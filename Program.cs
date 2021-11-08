@@ -13,6 +13,8 @@ namespace GetDrinksParser
     class Program
     {
         private static string dir = @"C:\Users\k.komarov\dev";
+
+        private static UntappdRepository UntappdRepository = new UntappdRepository();
         
         static void Main(string[] args)
         {
@@ -93,9 +95,11 @@ namespace GetDrinksParser
                 var beerVolMatch = volumeRx.Match(beer.Name);
                 if (beerVolMatch.Success)
                 {
-                    beer.Volume = (int)(float.Parse(beerVolMatch.Groups[1].Value) * 1000);
+                    beer.Volume = (int)(float.Parse(beerVolMatch.Groups[1].Value.Replace('.', ',')) * 1000);
                     beer.Name = beer.Name.Remove(beerVolMatch.Index).Trim();
                 }
+
+                MapStyle(beer);
 
                 list.Add(beer);
             }
@@ -118,7 +122,7 @@ namespace GetDrinksParser
 
         private static string NormalizeBeerName(string name)
         {
-            string[] prefixes = new[] {"пиво", "пивной напиток", "хард-лимонад", "сидр", "Limited edition | Пивной напиток"};
+            string[] prefixes = new[] {"пиво", "пивной напиток", "хард-лимонад", "сидр", "Limited edition | Пивной напиток", "медовуха"};
             foreach (var prefix in prefixes)
             {
                 if (name.StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
@@ -128,6 +132,15 @@ namespace GetDrinksParser
             }
 
             return name.Trim();
+        }
+
+        private static void MapStyle(GetDrinksItem beer)
+        {
+            var untappdBeer = UntappdRepository.SearchByName(beer.Name);
+            if (untappdBeer != null)
+            {
+                beer.Style = untappdBeer.Style;
+            }
         }
     }
 }

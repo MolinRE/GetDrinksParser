@@ -1,4 +1,5 @@
-﻿using Ganss.Excel;
+﻿using System;
+using Ganss.Excel;
 
 namespace GetDrinksParser
 {
@@ -29,7 +30,7 @@ namespace GetDrinksParser
         public float PackPrice { get; set; }
         
         [Column("Количество в упак.")]
-        public int PackQuantity => (int)(PackPrice / Price);
+        public int PackQuantity => (int)Math.Round(PackPrice / Price);
 
         [Ignore]
         public string Slug { get; set; }
