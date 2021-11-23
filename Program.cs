@@ -7,17 +7,25 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Ganss.Excel;
 using HtmlAgilityPack;
+using Saison;
+using Saison.Models.Beer;
 
 namespace GetDrinksParser
 {
     class Program
     {
+        private static bool RateLimitExceeded;
         private static string dir = @"C:\Users\k.komarov\dev";
 
-        private static UntappdRepository UntappdRepository = new UntappdRepository();
+        private static GetDrinksRepository _getDrinksRepository = new GetDrinksRepository();
+
+        private static Untappd untappd = new Untappd(
+            Environment.GetEnvironmentVariable("UntappdClientId"),
+            Environment.GetEnvironmentVariable("UntappdSecret"));
         
         static void Main(string[] args)
         {
+            //RateLimitExceeded = false;
             GetDrinks();
         }
 
@@ -59,7 +67,7 @@ namespace GetDrinksParser
             var regex = new Regex(@"Крепость: (\d{1,2}[,\.]?\d{0,2})\s?%");
             var volumeRx = new Regex(@"(0[,\.]\d{1,3})\s?л?");
 
-            var list = new List<GetDrinksItem>();
+            var list = new List<GetDrinksBeer>();
             foreach (var item in items)
             {
                 var getNode = new Func<string, HtmlNode>(className =>
@@ -67,7 +75,7 @@ namespace GetDrinksParser
                         .Where(p => p.Name == "div" || p.Name == "p")
                         .FirstOrDefault(p => p.Attributes["class"]?.Value == className));
 
-                var beer = new GetDrinksItem();
+                var beer = new GetDrinksBeer();
                 beer.Country = getNode("ProductCard__CardCountry-sc-1u74b9b-14 bhOCax")
                     .InnerText;
                 string abv = getNode("ProductCard__CardSubInfo-sc-1u74b9b-15 jnEROK")?.InnerText;
@@ -83,7 +91,7 @@ namespace GetDrinksParser
                 beer.Name = WebUtility.HtmlDecode(nameNode.InnerText);
                 beer.Name = NormalizeBeerName(beer.Name);
                 string href = nameNode.Element("a").Attributes["href"].Value;
-                beer.Slug = href.Substring(href.LastIndexOf('/') + 1);
+                beer.Slug = WebUtility.HtmlDecode(href); //href.Substring(href.LastIndexOf('/') + 1);
                 
                 var priceNodes = getNode("ProductCard__CardPrice-sc-1u74b9b-6 jFjbGX").ChildNodes
                     .OfType<HtmlTextNode>();
@@ -98,11 +106,13 @@ namespace GetDrinksParser
                     beer.Volume = (int)(float.Parse(beerVolMatch.Groups[1].Value.Replace('.', ',')) * 1000);
                     beer.Name = beer.Name.Remove(beerVolMatch.Index).Trim();
                 }
-
+                
                 MapStyle(beer);
 
                 list.Add(beer);
             }
+
+            _getDrinksRepository.Save();
 
             // CsvSerializer.UseEncoding = Encoding.GetEncoding(12)
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -110,7 +120,8 @@ namespace GetDrinksParser
             string fileName = @"C:\Users\k.komarov\dev\beers.xlsx";
             try
             {
-                new ExcelMapper().Save(fileName, list, "Пиво");
+                var excel = new ExcelMapper();
+                excel.Save(fileName, list, "Пиво");
 
                 Console.WriteLine($@"Saved to {fileName}");
             }
@@ -122,7 +133,17 @@ namespace GetDrinksParser
 
         private static string NormalizeBeerName(string name)
         {
-            string[] prefixes = new[] {"пиво", "пивной напиток", "хард-лимонад", "сидр", "Limited edition | Пивной напиток", "медовуха"};
+            string[] prefixes =
+            {
+                "пиво", 
+                "пивной напиток", 
+                "хард-лимонад", 
+                "сидр", 
+                "Limited edition | Пивной напиток", 
+                "Limited edition | Сидр", 
+                "медовуха", 
+                "напиток игристый"
+            };
             foreach (var prefix in prefixes)
             {
                 if (name.StartsWith(prefix, StringComparison.CurrentCultureIgnoreCase))
@@ -131,16 +152,81 @@ namespace GetDrinksParser
                 }
             }
 
+            name = name.Replace("Палм", "Palm");
+            name = name.Replace("Brewdog Hawkes", "Hawkes");
+            name = name.Replace("Paradox Brewery", "Paradox");
+            name = Regex.Replace(name, @".*?""(.+?)"".*", "$1");
+
             return name.Trim();
         }
 
-        private static void MapStyle(GetDrinksItem beer)
+        private static void MapStyle(GetDrinksBeer beer)
         {
-            var untappdBeer = UntappdRepository.SearchByName(beer.Name);
-            if (untappdBeer != null)
+            var dbBeer = _getDrinksRepository.SearchBySlug(beer.Slug);
+            if (dbBeer == null)
             {
-                beer.Style = untappdBeer.Style;
+                // Загружаем с Untappd и сохраняем в репо
+                if (LoadBeer(beer))
+                {
+                    dbBeer = _getDrinksRepository.SearchBySlug(beer.Slug);
+                }
             }
+            
+            if (dbBeer != null)
+            {
+                beer.Style = dbBeer.UntappdStyle;
+                beer.Name = dbBeer.Name;
+                beer.Brewery = dbBeer.Brewery;
+                beer.UntappdUrl = dbBeer.GetUntappdUrl();
+                beer.Abv = dbBeer.Abv;
+                beer.Ibu = dbBeer.Ibu;
+                beer.Brewery = dbBeer.Brewery;
+
+                // Обновляем данные в репо
+                if (beer.Volume > 0)
+                {
+                    dbBeer.GetDrinksVolume = beer.Volume;
+                }
+
+                dbBeer.GetDrinksPrice = beer.Price;
+                dbBeer.GetDrinksPackPrice = beer.PackPrice;
+            }
+        }
+
+        private static bool LoadBeer(GetDrinksBeer getDrinksBeer)
+        {
+            if (RateLimitExceeded)
+            {
+                return false;
+            }
+            
+            SearchItem untappdBeer;
+            try
+            {
+                untappdBeer = untappd.Beer.Search(getDrinksBeer.Name).Response.Beers.Items.FirstOrDefault();
+            }
+            catch (Exception ex)
+            {
+                RateLimitExceeded = true;
+                return false;
+            }
+            
+            if (untappdBeer == null)
+            {
+                if (!_getDrinksRepository.IsUnmatched(getDrinksBeer.Slug))
+                {
+                    Console.WriteLine($"Не найдено в Untappd: {getDrinksBeer.Name}");
+                    _getDrinksRepository.AddUnmatched(getDrinksBeer);
+                }
+            }
+
+            if (untappdBeer?.Beer != null)
+            {
+                _getDrinksRepository.AddBeer(getDrinksBeer, untappdBeer);
+                return true;
+            }
+            
+            return false;
         }
     }
 }
