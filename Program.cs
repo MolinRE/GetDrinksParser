@@ -6,6 +6,7 @@ using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
 using Ganss.Excel;
+using GetDrinksParser.Helpers;
 using HtmlAgilityPack;
 using Saison;
 using Saison.Models.Beer;
@@ -14,18 +15,19 @@ namespace GetDrinksParser
 {
     class Program
     {
-        private static bool RateLimitExceeded;
-        private static string dir = @"C:\Users\k.komarov\dev";
-
         private static GetDrinksRepository _getDrinksRepository = new GetDrinksRepository();
 
         private static Untappd untappd = new Untappd(
             Environment.GetEnvironmentVariable("UntappdClientId"),
             Environment.GetEnvironmentVariable("UntappdSecret"));
-        
+
         static void Main(string[] args)
         {
-            //RateLimitExceeded = false;
+            Settings.RateLimitExceeded = false;
+            
+            Settings.ValidateSaisonConfig();
+
+            Console.WriteLine($"Load from Untappd: {!Settings.RateLimitExceeded}");
             GetDrinks();
         }
 
@@ -33,7 +35,7 @@ namespace GetDrinksParser
         {
             var htmlDocument = new HtmlDocument();
 
-            string getdrinksFile = dir + "\\getdrinks.html";
+            string getdrinksFile = Path.Combine(Settings.DevDirectory, "getdrinks.html");
             if (File.Exists(getdrinksFile) && ((DateTime.Now - File.GetCreationTime(getdrinksFile)).TotalHours < 24))
             {
                 htmlDocument.Load(getdrinksFile);
@@ -82,7 +84,7 @@ namespace GetDrinksParser
                 if (abv != null)
                 {
                     var match = regex.Match(abv).Groups[1];
-                    beer.Abv = match.Value == "" ? 0 : float.Parse(match.Value.Replace('.', ',')) / 100;
+                    beer.Abv = match.Value == "" ? 0 : match.Value.ParseAsFloat() / 100;
                 }
 
                 beer.Style = getNode("ProductCard__InfoSectionRight-sc-1u74b9b-12 hmsHxU")
@@ -95,15 +97,15 @@ namespace GetDrinksParser
                 
                 var priceNodes = getNode("ProductCard__CardPrice-sc-1u74b9b-6 jFjbGX").ChildNodes
                     .OfType<HtmlTextNode>();
-                beer.Price = float.Parse(priceNodes.First().Text.Replace('.', ','));
+                beer.Price = priceNodes.First().Text.ParseAsFloat();
                 var packPrice = getNode("ProductCard__CardPricePerUnit-sc-1u74b9b-9 ghnDcx")
                     .ChildNodes.OfType<HtmlTextNode>();
-                beer.PackPrice = float.Parse(packPrice.First().Text.Replace('.', ','));
+                beer.PackPrice = packPrice.First().Text.ParseAsFloat();
                 
                 var beerVolMatch = volumeRx.Match(beer.Name);
                 if (beerVolMatch.Success)
                 {
-                    beer.Volume = (int)(float.Parse(beerVolMatch.Groups[1].Value.Replace('.', ',')) * 1000);
+                    beer.Volume = (int)(beerVolMatch.Groups[1].Value.ParseAsFloat() * 1000);
                     beer.Name = beer.Name.Remove(beerVolMatch.Index).Trim();
                 }
                 
@@ -117,7 +119,7 @@ namespace GetDrinksParser
             // CsvSerializer.UseEncoding = Encoding.GetEncoding(12)
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
-            string fileName = @"C:\Users\k.komarov\dev\beers.xlsx";
+            string fileName = Path.Combine(Settings.DevDirectory, "beers.xlsx");
             try
             {
                 var excel = new ExcelMapper();
@@ -163,7 +165,7 @@ namespace GetDrinksParser
         private static void MapStyle(GetDrinksBeer beer)
         {
             var dbBeer = _getDrinksRepository.SearchBySlug(beer.Slug);
-            if (dbBeer == null)
+            if (dbBeer?.UntappdId == 0)
             {
                 // Загружаем с Untappd и сохраняем в репо
                 if (LoadBeer(beer))
@@ -195,7 +197,7 @@ namespace GetDrinksParser
 
         private static bool LoadBeer(GetDrinksBeer getDrinksBeer)
         {
-            if (RateLimitExceeded)
+            if (Settings.RateLimitExceeded)
             {
                 return false;
             }
@@ -207,7 +209,7 @@ namespace GetDrinksParser
             }
             catch (Exception ex)
             {
-                RateLimitExceeded = true;
+                Settings.RateLimitExceeded = true;
                 return false;
             }
             
@@ -222,6 +224,7 @@ namespace GetDrinksParser
 
             if (untappdBeer?.Beer != null)
             {
+                Console.WriteLine($"Loaded from Untappd: {getDrinksBeer.Name}");
                 _getDrinksRepository.AddBeer(getDrinksBeer, untappdBeer);
                 return true;
             }

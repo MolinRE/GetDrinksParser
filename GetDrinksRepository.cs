@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using GetDrinksParser.Models;
+using Saison;
 
 namespace GetDrinksParser
 {
@@ -27,7 +28,7 @@ namespace GetDrinksParser
     
     internal class GetDrinksRepository
     {
-        private const string fileName = @"C:\Users\k.komarov\dev\getdrinks_beer_data.json";
+        private static string fileName = Path.Combine(Settings.DataDirectory, "getdrinks_beer_data.json");
         
         private DbContainer Data;
         
@@ -50,6 +51,11 @@ namespace GetDrinksParser
 
         public void AddBeer(GetDrinksBeer getDrinksBeer, Saison.Models.Beer.SearchItem beer)
         {
+            string slug = getDrinksBeer.Slug;
+
+            // Удаляем предыдущие записи
+            Data.Beers.RemoveAll(p => p.Url.Equals(slug, StringComparison.CurrentCultureIgnoreCase));
+            
             Data.Beers.Add(new BeerInfo()
             {
                 UntappdId = beer.Beer.Bid,
