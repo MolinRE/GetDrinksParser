@@ -2,7 +2,7 @@
 {
 	public class BeerInfo
 	{
-		public int UntappdId { get; set; }
+		public int? UntappdId { get; set; }
 		public string UntappdSlug { get; set; }
 		public string Name { get; set; }
 		/// <summary>

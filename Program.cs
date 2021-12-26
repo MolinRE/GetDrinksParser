@@ -165,8 +165,10 @@ namespace GetDrinksParser
         private static void MapStyle(GetDrinksBeer beer)
         {
             var dbBeer = _getDrinksRepository.SearchBySlug(beer.Slug);
-            if (dbBeer?.UntappdId == 0)
+            if (dbBeer == null || !dbBeer.UntappdId.HasValue || dbBeer.UntappdId.Value == 0)
             {
+                // Переопределяем имя, если пиво было занесено вручную
+                beer.Name = dbBeer?.Name ?? beer.Name;
                 // Загружаем с Untappd и сохраняем в репо
                 if (LoadBeer(beer))
                 {
