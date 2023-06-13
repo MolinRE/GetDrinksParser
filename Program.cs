@@ -15,17 +15,16 @@ namespace GetDrinksParser
 {
     class Program
     {
-        private static GetDrinksRepository _getDrinksRepository = new GetDrinksRepository();
+        private static readonly GetDrinksRepository GetDrinksRepository = new GetDrinksRepository();
 
-        private static Untappd untappd = new Untappd(
-            Environment.GetEnvironmentVariable("UntappdClientId"),
-            Environment.GetEnvironmentVariable("UntappdSecret"));
+        private static Untappd UntappdClient;
 
         static void Main(string[] args)
         {
             Settings.RateLimitExceeded = false;
             
             Settings.ValidateSaisonConfig();
+            UntappdClient = new Untappd(Settings.UntappdClientId, Settings.UntappdClientSecret);
 
             Console.WriteLine($"Load from Untappd: {!Settings.RateLimitExceeded}");
             GetDrinks();
@@ -114,7 +113,7 @@ namespace GetDrinksParser
                 list.Add(beer);
             }
 
-            _getDrinksRepository.Save();
+            GetDrinksRepository.Save();
 
             // CsvSerializer.UseEncoding = Encoding.GetEncoding(12)
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
@@ -164,15 +163,19 @@ namespace GetDrinksParser
 
         private static void MapStyle(GetDrinksBeer beer)
         {
-            var dbBeer = _getDrinksRepository.SearchBySlug(beer.Slug);
+            var dbBeer = GetDrinksRepository.SearchBySlug(beer.Slug);
             if (dbBeer == null || !dbBeer.UntappdId.HasValue || dbBeer.UntappdId.Value == 0)
             {
                 // Переопределяем имя, если пиво было занесено вручную
                 beer.Name = dbBeer?.Name ?? beer.Name;
+                /*
+                 * TODO: Возможно стоит сделать загрузку по ID (хотя и по имени норм работает), но у методов
+                 * BeerInfo и Search в либе разные типы в ответе, поэтому хз как лучше
+                 */
                 // Загружаем с Untappd и сохраняем в репо
                 if (LoadBeer(beer))
                 {
-                    dbBeer = _getDrinksRepository.SearchBySlug(beer.Slug);
+                    dbBeer = GetDrinksRepository.SearchBySlug(beer.Slug);
                 }
             }
             
@@ -207,7 +210,7 @@ namespace GetDrinksParser
             SearchItem untappdBeer;
             try
             {
-                untappdBeer = untappd.Beer.Search(getDrinksBeer.Name).Response.Beers.Items.FirstOrDefault();
+                untappdBeer = UntappdClient.Beer.Search(getDrinksBeer.Name).Response.Beers.Items.FirstOrDefault();
             }
             catch (Exception ex)
             {
@@ -217,17 +220,17 @@ namespace GetDrinksParser
             
             if (untappdBeer == null)
             {
-                if (!_getDrinksRepository.IsUnmatched(getDrinksBeer.Slug))
+                if (!GetDrinksRepository.IsUnmatched(getDrinksBeer.Slug))
                 {
                     Console.WriteLine($"Не найдено в Untappd: {getDrinksBeer.Name}");
-                    _getDrinksRepository.AddUnmatched(getDrinksBeer);
+                    GetDrinksRepository.AddUnmatched(getDrinksBeer);
                 }
             }
 
             if (untappdBeer?.Beer != null)
             {
                 Console.WriteLine($"Loaded from Untappd: {getDrinksBeer.Name}");
-                _getDrinksRepository.AddBeer(getDrinksBeer, untappdBeer);
+                GetDrinksRepository.AddBeer(getDrinksBeer, untappdBeer);
                 return true;
             }
             
