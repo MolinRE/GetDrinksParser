@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Threading.Tasks;
 using GetDrinksParser.Models;
 using Saison;
 
@@ -44,12 +45,18 @@ namespace GetDrinksParser
             }
         }
 
+        public async Task ClearMatched()
+        {
+            Data.Unmatched.RemoveAll(p => p.Name != null && Data.Beers.Any(p2 => p2.Url.Equals(p.Url, StringComparison.CurrentCultureIgnoreCase)));
+            await Save();
+        }
+        
         public BeerInfo SearchBySlug(string slug)
         {
             return Data.Beers.FirstOrDefault(p => p.Url.Equals(slug, StringComparison.CurrentCultureIgnoreCase));
         }
 
-        public void AddBeer(GetDrinksBeer getDrinksBeer, Saison.Models.Beer.SearchItem beer)
+        public async Task AddBeer(GetDrinksBeer getDrinksBeer, Saison.Models.Beer.SearchItem beer)
         {
             string slug = getDrinksBeer.Slug;
 
@@ -75,10 +82,10 @@ namespace GetDrinksParser
                 GetDrinksVolume = getDrinksBeer.Volume
             });
 
-            Save();
+            await Save();
         }
 
-        public void AddUnmatched(GetDrinksBeer beer)
+        public async Task AddUnmatched(GetDrinksBeer beer)
         {
             Data.Unmatched.Add(new BeerInfo()
             {
@@ -86,7 +93,7 @@ namespace GetDrinksParser
                 Url = beer.Slug
             });
 
-            Save();
+            await Save();
         }
 
         public bool IsUnmatched(string slug)
@@ -94,9 +101,9 @@ namespace GetDrinksParser
             return Data.Unmatched.Any(p => p.Url.Equals(slug, StringComparison.CurrentCultureIgnoreCase));
         }
 
-        public void Save()
+        public async Task Save()
         {
-            File.WriteAllText(fileName, 
+            await File.WriteAllTextAsync(fileName, 
                 JsonSerializer.Serialize(Data, new JsonSerializerOptions()
                 {
                     Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,

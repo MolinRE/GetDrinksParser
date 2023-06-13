@@ -5,6 +5,7 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using Ganss.Excel;
 using GetDrinksParser.Helpers;
 using HtmlAgilityPack;
@@ -15,11 +16,11 @@ namespace GetDrinksParser
 {
     class Program
     {
-        private static readonly GetDrinksRepository GetDrinksRepository = new GetDrinksRepository();
+        private static readonly GetDrinksRepository GetDrinksRepository = new();
 
         private static Untappd UntappdClient;
 
-        static void Main(string[] args)
+        static async Task Main(string[] args)
         {
             Settings.RateLimitExceeded = false;
             
@@ -27,10 +28,12 @@ namespace GetDrinksParser
             UntappdClient = new Untappd(Settings.UntappdClientId, Settings.UntappdClientSecret);
 
             Console.WriteLine($"Load from Untappd: {!Settings.RateLimitExceeded}");
-            GetDrinks();
+
+            await GetDrinksRepository.ClearMatched();
+            await GetDrinks();
         }
 
-        private static void GetDrinks()
+        private static async Task GetDrinks()
         {
             var htmlDocument = new HtmlDocument();
 
@@ -113,7 +116,7 @@ namespace GetDrinksParser
                 list.Add(beer);
             }
 
-            GetDrinksRepository.Save();
+            await GetDrinksRepository.Save();
 
             // CsvSerializer.UseEncoding = Encoding.GetEncoding(12)
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
